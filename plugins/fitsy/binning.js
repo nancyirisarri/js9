@@ -16,7 +16,7 @@
 
 	if ( !im ) { return; }
 
-	var options = $.extend(true, {}, JS9.fits.options
+	var options = $.extend(true, {}, Fitsy.options
 	    , { table: { cx: form.cx.value , cy: form.cy.value  
 	    	       , nx: form.nx.value , ny: form.ny.value
 		       , bin: form.bin.value , filter: form.filter.value }
@@ -26,8 +26,6 @@
 
 	if ( hdu.type === "image" ) {
 
-	  switch(JS9.fitsLibrary()){
-	  case "fitsy":
 	    var bin = Math.round(Number(form.bin.value));
 	    hdu.bin        = bin;
 	    form.bin.value = bin;
@@ -104,24 +102,10 @@
 	    Fitsy.cardcopy(hdu, "LTV2",     hdu, "LTV2",   0.0, function(x) { return x/bin; });
 
 	    JS9.RefreshImage(hdu, {display: display});
-	    break;
-	    case "cfitsio":
-	      JS9.error("image binning not yet implemented using cfitsio");
-	      break;
-          }
 	} else {
-	    switch(JS9.fitsLibrary()){
-	    case "fitsy":
-		Fitsy.readTableHDUData(hdu.fits, hdu, options, function(hdu){
-	            JS9.RefreshImage(hdu, {display: display});
-		});
-		break;
-	    case "cfitsio":
-		JS9.fits.getFITSImage(hdu.fits, hdu, options, function(hdu){
-		    JS9.RefreshImage(hdu, {display: display});
-		});
-		break;
-	    }
+	    Fitsy.readTableHDUData(hdu.fits, hdu, options, function (hdu) {
+	        JS9.RefreshImage(hdu, {display: display});
+	    });
 	}
     }
 

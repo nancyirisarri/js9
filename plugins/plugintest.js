@@ -6,7 +6,7 @@
 /*global $, jQuery, JS9, sprintf */
 
 // To specify the JS9 display instance to link to a given PLUGIN div,
-// use the HTML5 dataset syntax: 
+// use the HTML5 dataset syntax:
 //    <div class="PLUGINtest" data-js9id="JS9"></div>
 
 // make a module so as not to pollute the global namespace
@@ -61,14 +61,14 @@ PLUGIN.Test.prototype.message = function(message, row) {
 // ipos: image position; origin at 1,1 (FITS convention)
 // evt:  the event passed to the callback
 PLUGIN.mousedown = function(im, ipos, evt){
-    var t = sprintf("mouseDown: ipos=%s,%s", ipos.x, ipos.y);
-    this.message(t, 0);
+    //var t = sprintf("mouseDown: ipos=%s,%s", ipos.x, ipos.y);
+    //this.message(t, 0);
 };
 
 // callback when mouse is released
 PLUGIN.mouseup = function(im, ipos, evt){
-    var t = sprintf("mouseUp: ipos=%s,%s", ipos.x, ipos.y);
-    this.message(t, 0);
+    //var t = sprintf("mouseUp: ipos=%s,%s", ipos.x, ipos.y);
+    //this.message(t, 0);
 };
 
 // callback when mouse (or one-finger touch) moves (without a mouse press)
@@ -76,30 +76,30 @@ PLUGIN.mouseup = function(im, ipos, evt){
 // but add 0.5 before rounding since x.0 is in the middle of the pixel
 PLUGIN.mousemove = function(im, ipos, evt){
     var v, t;
-    v = im.raw.data[Math.floor(ipos.y-0.5) * im.raw.width + 
+    v = im.raw.data[Math.floor(ipos.y-0.5) * im.raw.width +
 		    Math.floor(ipos.x-0.5)];
-    t = sprintf("mouseMove: ipos=%s,%s val=%s", ipos.x, ipos.y, v);
-    this.message(t, 0);
+    //t = sprintf("mouseMove: ipos=%s,%s val=%s", ipos.x, ipos.y, v);
+    //this.message(t, 0);
 };
 
 // callback when mouse moves over the image
 PLUGIN.mouseover = function(im, ipos, evt){
-    var t = sprintf("mouseOver: ipos=%s,%s", ipos.x, ipos.y);
-    this.message(t, 0);
+    //var t = sprintf("mouseOver: ipos=%s,%s", ipos.x, ipos.y);
+    //this.message(t, 0);
 };
 
 // callback when mouse moves out of the image
 PLUGIN.mouseout = function(im, ipos, evt){
-    var t = sprintf("mouseOut: ipos=%s,%s", ipos.x, ipos.y);
-    this.message(t, 0);
+    //var t = sprintf("mouseOut: ipos=%s,%s", ipos.x, ipos.y);
+    //this.message(t, 0);
 };
 
 // callback when key is pressed
 PLUGIN.keypress = function(im, ipos, evt){
     var charCode = evt.which || evt.keyCode;
     var charStr = String.fromCharCode(charCode);
-    var t = sprintf("keyPress: %s -> %s", charCode, charStr);
-    this.message(t, 2);
+    //var t = sprintf("keyPress: %s -> %s", charCode, charStr);
+    //this.message(t, 2);
 };
 
 // callback when regions change
@@ -109,29 +109,38 @@ PLUGIN.regionschange = function(im, xreg){
     var t = sprintf("%s%s: ", xreg.shape, mode);
     switch(xreg.shape){
     case "annulus":
-        t += sprintf("ipos=%.2f,%.2f radii=", xreg.x, xreg.y);
+        //t += sprintf("ipos=%.2f,%.2f radii=", xreg.x, xreg.y);
+        t = sprintf("ipos=%.2f,%.2f radii=", xreg.x, xreg.y);
         for(i=0; i<xreg.radii.length; i++){
 	    if( i !== 0 ){ t += ","; }
 	    t += sprintf("%.2f", xreg.radii[i]);
         }
         break;
     case "box":
-        t += sprintf("ipos=%.2f,%.2f size=%.2f,%.2f angle=%.2f",
+        //t += sprintf("ipos=%.2f,%.2f size=%.2f,%.2f angle=%.2f",
+		     //xreg.x, xreg.y, xreg.width, xreg.height, xreg.angle);
+        t = sprintf("ipos=%.2f,%.2f size=%.2f,%.2f angle=%.2f",
 		     xreg.x, xreg.y, xreg.width, xreg.height, xreg.angle);
         break;
     case "circle":
-        t += sprintf("ipos=%.2f,%.2f radius=%.2f", 
+        //t += sprintf("ipos=%.2f,%.2f radius=%.2f",
+                     //xreg.x, xreg.y, xreg.radius);
+        t = sprintf("ipos=%.2f,%.2f radius=%.2f",
                      xreg.x, xreg.y, xreg.radius);
         break;
     case "ellipse":
-        t += sprintf("ipos=%.2f,%.2f eradii=%.2f,%.2f angle=%.2f", 
+        //t += sprintf("ipos=%.2f,%.2f eradii=%.2f,%.2f angle=%.2f",
+		     //xreg.x, xreg.y, xreg.r1, xreg.r2, xreg.angle);
+        t = sprintf("ipos=%.2f,%.2f eradii=%.2f,%.2f angle=%.2f",
 		     xreg.x, xreg.y, xreg.r1, xreg.r2, xreg.angle);
         break;
    case "point":
-        t += sprintf("ipos=%.2f,%.2f", xreg.x, xreg.y);
+        //t += sprintf("ipos=%.2f,%.2f", xreg.x, xreg.y);
+        t = sprintf("ipos=%.2f,%.2f", xreg.x, xreg.y);
 	break;
    case "polygon":
-        t += "points=";
+        //t += "points=";
+        t = "points=";
         for(i=0; i<xreg.pts.length; i++){
 	    t += sprintf("%.2f,%.2f ", xreg.pts[i].x, xreg.pts[i].y);
         }
@@ -145,18 +154,18 @@ PLUGIN.regionschange = function(im, xreg){
 PLUGIN.imageload = function(im){
     var t;
     // im gives access to image object
-    t = sprintf("image loaded: %s (%s,%s)", im.id, im.raw.width, im.raw.height);
+    //t = sprintf("image loaded: %s (%s,%s)", im.id, im.raw.width, im.raw.height);
     // context is the calling instance
-    this.message(t, 3);
+    //this.message(t, 3);
 };
 
 // callback when image is displayed
 PLUGIN.imagedisplay = function(im){
     var t;
     // im gives access to image object
-    t = sprintf("image displayed: %s", im.id);
+    //t = sprintf("image displayed: %s", im.id);
     // context is the calling instance
-    this.message(t, 3);
+    //this.message(t, 3);
 };
 
 // add this plugin into JS9

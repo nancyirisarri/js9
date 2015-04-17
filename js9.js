@@ -1,12 +1,11 @@
 /*
- *
- * JS9 module (December 10, 2012)
+ * JS9 module (December 10, 2012) via SAOimage module (June 18, 2012)
  *
  * Principals: Eric Mandel, Alexey Vikhlinin
  * Organization: Harvard Smithsonian Center for Astrophysics, Cambridge MA
  * Contact: saord@cfa.harvard.edu
  *
- * Copyright (c) 2012 - 2015 Smithsonian Astrophysical Observatory
+ * Copyright (c) 2012 - 2014 Smithsonian Astrophysical Observatory
  *
  * Utilizes: jquery.js
  *           jquery.contextMenu.js
@@ -15,14 +14,14 @@
  *           fabric.js
  *           dhtmlwindow.js
  *           sprintf.js
- *           astroem.js (includes cfitsio, wcslib)
+ *           astroem.js
  *           fitsy.js
  *
  */
 
 /*jslint plusplus: true, vars: true, white: true, continue: true, unparam: true, regexp: true, browser: true, devel: true, nomen: true */
 
-/*global $, jQuery, Event, fabric, io, CanvasRenderingContext2D, sprintf, Blob, ArrayBuffer, Uint8Array, Uint16Array, Int16Array, Int32Array, Float32Array, Float64Array, DataView, FileReader, Fitsy, Astroem, Module, dhtmlwindow */
+/*global $, jQuery, Event, fabric, io, CanvasRenderingContext2D, sprintf, Blob, ArrayBuffer, Uint8Array, Uint16Array, Int16Array, Int32Array, Float32Array, Float64Array, DataView, Fitsy, Astroem, Module, dhtmlwindow */
 
 /*jshint smarttabs:true */
 
@@ -34,16 +33,32 @@ if( JS9 && (typeof JS9 !== "object" || JS9.NAME) ){
 // create the module and seed with standard values
 var JS9 = {};
 JS9.NAME = "JS9";		// The name of this namespace
-JS9.VERSION = "1.3";		// The version of this namespace
-JS9.COPYRIGHT = "Copyright (c) 2012-2015 Smithsonian Institution";
+JS9.VERSION = "1.1";		// The version of this namespace
+JS9.COPYRIGHT = "Copyright (c) 2012-2014 Smithsonian Institution";
 
 // use the module augmentation pattern, passing in our already-defined module
 JS9 = (function(JS9){
 "use strict";
+// display defaults (not usually changed by users)
+JS9.DEFID = "JS9";		// default JS9 display id
+JS9.WIDTH = 512;		// width of js9 canvas
+JS9.HEIGHT = 512;		// height of js9 canvas
+// JS9.INFOWIDTH = 390;		// width of js9Info box
+JS9.INFOWIDTH = 345;		// width of js9Info box
+JS9.INFOHEIGHT = 265;		// height of js9Info box
+JS9.MENUWIDTH = JS9.WIDTH;	// width of js9Menubar
+JS9.MENUHEIGHT = 50;		// height of js9Menubar
+JS9.CONWIDTH = JS9.WIDTH;	// width of js9Console
+JS9.CONHEIGHT = 180;		// height of js9Console
+JS9.PANWIDTH = Math.floor(JS9.WIDTH/1.6);	// width of js9Pan canvas
+JS9.PANHEIGHT = Math.floor(JS9.HEIGHT/1.6);	// height of js9Pan canvas
+JS9.MAGWIDTH = JS9.WIDTH/2;	// width of js9Mag canvas
+JS9.MAGHEIGHT = JS9.HEIGHT/2;	// height of js9Mag canvas
+JS9.DS9WIDTH = 250;		// width of small js9Pan canvas
+JS9.DS9HEIGHT = 250;		// height of small js9Pan canvas
+JS9.ANON = "[anonymous]";	// name to use for images with no name
 
 // internal defaults (not usually changed by users)
-JS9.DEFID = "JS9";		// default JS9 display id
-JS9.ANON = "[anonymous]";	// name to use for images with no name
 JS9.PREFSFILE = "js9Prefs.json";// prefs file to load
 JS9.ZINDEX = 0;			// z-index of image canvas: on bottom of js9
 JS9.SHAPEZINDEX = 4;		// 2-8: z-index of 2d graphics (4 is default)
@@ -89,10 +104,6 @@ JS9.globalOpts = {
     fits2png: false,		// do we convert FITS to  PNG representation?
     alerts: true,		// set to false to turn off alerts
     internalValPos: true,	// a fancy info plugin can turns this off
-    xtimeout: 1000,		// connection timeout for xhr requests
-    extlist: "EVENTS STDEVT",	// list of binary table extensions
-    dims: [2048, 2048],		// dims of extracted images
-    maxMemory: 450000000,	// max heap memory to allocate for a fits image
     debug: 0			// debug level
 };
 
@@ -248,7 +259,6 @@ JS9.preloads = [];		// array of images to preload
 JS9.auxFiles = [];		// array of auxiliary files
 JS9.publics = {};		// object containing defined public API calls
 JS9.helper = {};		// only one helper per page, please
-JS9.fits = {};			// object holding FITS access routines
 
 // misc params
 // list of scales in mkScaledCells
@@ -296,29 +306,11 @@ if( (JS9.BROWSER[0] === "Chrome") ){
 // JS9 Image object to manage images
 // ---------------------------------------------------------------------
 JS9.Image = function(file, params, func){
-    var sarr;
+    var sarr = [];
     var display;
     var pname, pinst, popts;
     var that = this;
     var localOpts=null;
-    var mksect = function(that, localOpts){
-	var zoom;
-	var arr = [];
-	// make up section array from default values
-	if( localOpts.xcen !== undefined ){
-	    arr.push(localOpts.xcen);
-	}
-	if( localOpts.ycen !== undefined ){
-	    arr.push(localOpts.ycen);
-	}
-	if( localOpts.zoom !== undefined ){
-	    zoom = that.parseZoom(localOpts.zoom);
-	    if( zoom ){
-		arr.push(zoom);
-	    }
-	}
-	return arr;
-    };
     // params can be an object containing local params, or the display string
     if( params ){
 	if( typeof params === "object" ){
@@ -357,6 +349,8 @@ JS9.Image = function(file, params, func){
     // offsets into canvas to display
     this.ix = 0;
     this.iy = 0;
+    // no helper coord info yet
+    this.helperCoords = "";
     // init some new parameters
     this.params.scalemin = Number.Nan;
     this.params.scalemax = Number.Nan;
@@ -386,6 +380,16 @@ JS9.Image = function(file, params, func){
     this.binning = {bin: 1, obin: 1};
     // temp flag determines if we should update shapes at end of this call
     this.updateshapes = false;
+    // make up section array from default values
+    if( localOpts.xcen !== undefined ){
+	sarr.push(localOpts.xcen);
+    }
+    if( localOpts.ycen !== undefined ){
+	sarr.push(localOpts.ycen);
+    }
+    if( localOpts.zoom !== undefined ){
+	sarr.push(localOpts.zoom);
+    }
     // file argument can be an object containing raw data or
     // a string containing a URL of a PNG image
     switch( typeof file ){
@@ -401,7 +405,6 @@ JS9.Image = function(file, params, func){
 	// set up initial section
 	this.mkSection();
 	// change center and zoom if necessary
-	sarr = mksect(this, localOpts);
 	if( sarr.length ){
 	    this.mkSection.apply(this, sarr);
 	}
@@ -465,7 +468,6 @@ JS9.Image = function(file, params, func){
 	    // set up initial section
 	    that.mkSection();
 	    // change center and zoom if necessary
-	    sarr = mksect(that, localOpts);
 	    if( sarr.length ){
 		that.mkSection.apply(that, sarr);
 	    }
@@ -561,10 +563,6 @@ JS9.Image.prototype.closeImage = function(){
 		JS9.globalOpts.rgb.bim = null;
 		break;
 	    }
-	    // cleanup FITS file support, if necessary
-	    if( JS9.fits.cleanupFITSFile ){
-		JS9.fits.cleanupFITSFile(tim.raw.hdu.fits, true);
-	    }
 	    // good hints to the garbage collector
 	    tim.primary = null;
 	    tim.offscreen = null;
@@ -636,6 +634,7 @@ JS9.Image.prototype.mkOffScreenCanvas = function(){
 // initialize keywords for various logical coordinate systems
 JS9.Image.prototype.initLCS = function(header){
     var arr = [[0,0,0], [0,0,0], [0,0,0]];
+    // adapted from fitsy/inverse.c
     var invertm3 = function(xin){
 	var i, j;
 	var det_1;
@@ -724,11 +723,6 @@ JS9.Image.prototype.initLCS = function(header){
     if( !this.lcs[this.params.lcs] ){
 	this.params.lcs = "image";
     }
-    // set current, if not already done
-    if( !this.params.wcssys0 ){
-	this.setWCSSys("physical");
-	this.params.wcssys0 = this.params.lcs;
-    }
 };
 
 // unpack IMG data and convert to JS9 image data
@@ -783,8 +777,7 @@ JS9.Image.prototype.mkRawDataFromIMG = function(img){
 
 // unpack PNG data and convert to image data
 JS9.Image.prototype.mkRawDataFromPNG = function(){
-    var i, s, idx, offscreen, dlen, mode, tval,  getfunc, littleEndian;
-    var card, pars, clen;
+    var i, j, s, idx, offscreen, dlen, mode, tval,  getfunc, littleEndian;
     var realpng, hstr, hstrs = [];
     // memory array of 8 bytes
     var abuf = new ArrayBuffer(8);
@@ -802,23 +795,23 @@ JS9.Image.prototype.mkRawDataFromPNG = function(){
     // offscreen image data
     offscreen = this.offscreen.img.data;
     // gather up the json header (until we hit a null, skipping bogus values)
-    for(idx=0, i=0; idx<offscreen.length; idx++) {
+    for(i=0, j=0; i<offscreen.length; i++) {
 	// null is the end of the string
-	if( offscreen[idx] === 0 ){
+	if( offscreen[i] === 0 ){
 	    break;
 	} 
-	if( offscreen[idx] !== 255 ){
-	    hstrs[i] = String.fromCharCode(offscreen[idx]);
-	    i++;
+	if( offscreen[i] !== 255 ){
+	    hstrs[j] = String.fromCharCode(offscreen[i]);
+	    j++;
 	}
 	// check for a JS9 header on a representation file
-	if( (i === 15) && (hstrs.join("") !== '{"js9Protocol":') ){
+	if( (j === 15) && (hstrs.join("") !== '{"js9Protocol":') ){
 	    realpng = true;
 	    break;
 	}
     }
     // see if we have a real PNG file instead of a representation file
-    if( (i < 15) || realpng ){
+    if( (j < 15) || realpng ){
 	// holy moly, its a real png file!
 	this.mkRawDataFromIMG(this.offscreen.img); 
 	// having the real image, we can ask to release the offscreen image
@@ -831,32 +824,12 @@ JS9.Image.prototype.mkRawDataFromPNG = function(){
     if( JS9.DEBUG > 2 ){
 	JS9.log("jsonHeader: %s", hstr);
     }
-    try{ s = JSON.parse(hstr); }
+    try{ this.raw.header = JSON.parse(hstr); }
     catch(e){
 	JS9.error("can't read FITS header from PNG file: "+hstr, e);
     }
-    if( s.js9Protocol === 1.0 ){
-	this.raw.header = s;
-	this.raw.endian = this.raw.header.js9Endian;
-	this.raw.protocol = this.raw.header.js9Protocol;
-    } else {
-	this.raw.endian = s.js9Endian;
-	this.raw.protocol = s.js9Protocol;
-	this.raw.cardstr = s.cardstr;
-	this.raw.ncard = s.ncard;
-	this.raw.header = {};
-	// make up header from string containing 80-char raw cards
-	clen = this.raw.ncard;
-	for(i=0; i<clen; i++){
-	    card = this.raw.cardstr.slice(i*80, (i+1)*80);
-	    pars = JS9.cardpars(card);
-	    if ( pars !== undefined ) {
-		this.raw.header[pars[0]] = pars[1];
-	    }
-	}
-    }
     // set the pointer to start of "real" image data
-    idx = idx + 1;
+    idx = i + 1;
     // make sure we have a valid FITS header
     if( this.raw.header.NAXIS1 ){
 	this.raw.width = this.raw.header.NAXIS1;
@@ -873,10 +846,13 @@ JS9.Image.prototype.mkRawDataFromPNG = function(){
     } else {
 	JS9.error("BITPIX missing from PNG-based FITS header");
     }
-    if( this.raw.endian === "little" ){
-	littleEndian = true;
-    } else if( this.raw.endian === "big" ){
-	littleEndian = false;
+    if( this.raw.header.js9Endian ){
+	this.raw.endian = this.raw.header.js9Endian;
+	if( this.raw.endian === "little" ){
+	    littleEndian = true;
+	} else {
+	    littleEndian = false;
+	}
     } else {
 	JS9.error("js9Endian missing from PNG-based FITS header");
     }
@@ -1119,23 +1095,36 @@ JS9.Image.prototype.mkRawDataFromPNG = function(){
     }
     // having the real image, we can ask to release the offscreen image
     this.offscreen.img = null;    
-    // init WCS, if possible
-    this.wcs = JS9.initwcs(JS9.raw2FITS(this.raw));
-    if( this.wcs > 0 ){
-	// set the wcs system
-	this.setWCSSys(this.params.wcssys);
-	// this is also the default
-	this.params.wcssys0 = this.params.wcssys.trim();
+    // init internal wcs and logical wcs, if possible
+    if( this.type === "image" ){
+	// wcs
+	if( JS9.initwcs ){
+	    try{ 
+		s = JS9.raw2FITS(this.raw);
+		this.wcs = JS9.initwcs(s);
+		if( this.wcs > 0 ){
+		    // set the wcs system
+		    this.setWCSSys(this.params.wcssys);
+		    // this is also the default
+		    this.params.wcssys0 = this.params.wcssys.trim();
+		    // set the wcs units
+		    this.setWCSUnits(this.params.wcsunits);
+		}
+	    }
+	    catch(e){ JS9.log("could not init wcs", e); }
+	} else {
+	    this.wcs = 0;
+	}
+	// try to init the logical coordinate system
+	this.initLCS(this.raw.header);
     }
-    // init the logical coordinate system, if possible
-    this.initLCS(this.raw.header);
     // allow chaining
     return this;
 };
 
 // read input object and convert to image data
 JS9.Image.prototype.mkRawDataFromHDU = function(obj, file){
-    var i, s, ui, dlen, clen, hdu, pars, card;
+    var i, s, ui, dlen, hdu;
     var owidth, oheight, obitpix;
     if( $.isArray(obj) || JS9.isTypedArray(obj) || obj instanceof ArrayBuffer ){
 	// flatten if necessary
@@ -1145,7 +1134,7 @@ JS9.Image.prototype.mkRawDataFromHDU = function(obj, file){
 	// javascript array or typed array
 	hdu = {image: obj};
     } else if( typeof obj === "object" ){
-	// fits object
+	// fitsy object
 	hdu = obj;
     } else {
 	JS9.error("unknown or missing input for HDU creation");
@@ -1156,7 +1145,7 @@ JS9.Image.prototype.mkRawDataFromHDU = function(obj, file){
     }
     // better have the image ...
     if( !hdu.image ){
-	JS9.error("data missing from JS9 FITS object" + JSON.stringify(hdu));
+	JS9.error("data missing from JS9 FITS object");
     }
     // quick check for 1D images (in case naxis is defined)
     if( hdu.naxis < 2 ){
@@ -1182,7 +1171,7 @@ JS9.Image.prototype.mkRawDataFromHDU = function(obj, file){
 	oheight = this.raw.height;
 	obitpix = this.raw.bitpix;
     }
-    // fill in raw data info directly from the fits object
+    // fill in raw data info directly from the fitsy object
     this.raw = {};
     this.raw.hdu = hdu;
     if( hdu.axis ){
@@ -1211,60 +1200,38 @@ JS9.Image.prototype.mkRawDataFromHDU = function(obj, file){
 	   ui[i] = s.charCodeAt(i);
 	}
     }
-    // make sure we have a typed array
-    // flatten if necessary
-    if( $.isArray(hdu.image[0]) ){
-	hdu.image = hdu.image.reduce(function(a, b){return a.concat(b);});
+    // convert encoded string/array into a typed array
+    if( $.isArray(hdu.image) || hdu.image instanceof ArrayBuffer ){
+	// flatten if necessary
+	if( $.isArray(hdu.image[0]) ){
+	    hdu.image = hdu.image.reduce(function(a, b){return a.concat(b);});
+	}
+	switch(this.raw.bitpix){
+	case 8:
+	    this.raw.data = new Uint8Array(hdu.image);
+	break;
+	case 16:
+	    this.raw.data = new Int16Array(hdu.image);
+	break;
+	case -16:
+	    this.raw.data = new Uint16Array(hdu.image);
+	break;
+	case 32:
+	    this.raw.data = new Int32Array(hdu.image);
+	break;
+	case -32:
+	    this.raw.data = new Float32Array(hdu.image);
+	break;
+	case -64:
+	    this.raw.data = new Float64Array(hdu.image);
+	break;
+	}
+    } else {
+	this.raw.data = hdu.image;
     }
-    switch(this.raw.bitpix){
-    case 8:
-	this.raw.data = new Uint8Array(hdu.image);
-	break;
-    case 16:
-	this.raw.data = new Int16Array(hdu.image);
-	break;
-    case -16:
-	this.raw.data = new Uint16Array(hdu.image);
-	break;
-    case 32:
-	this.raw.data = new Int32Array(hdu.image);
-	break;
-    case -32:
-	this.raw.data = new Float32Array(hdu.image);
-	break;
-    case -64:
-	this.raw.data = new Float64Array(hdu.image);
-	break;
-    }
-    // array of cards
-    this.raw.card = hdu.card;
-    // cfitsio returns these:
-    this.raw.cardstr = hdu.cardstr;
-    this.raw.ncard = hdu.ncard;
     // look for header
     if( hdu.head ){
 	this.raw.header = hdu.head;
-    } else if( this.raw.card ){
-	this.raw.header = {};
-	// make up header from array of raw cards
-	clen = this.raw.card.length;
-	for(i=0; i<clen; i++){
-	    pars = JS9.cardpars(this.raw.card[i]);
-	    if ( pars !== undefined ) {
-		this.raw.header[pars[0]] = pars[1];
-	    }
-	}
-    } else if( this.raw.cardstr ){
-	this.raw.header = {};
-	// make up header from string containing 80-char raw cards
-	clen = this.raw.ncard;
-	for(i=0; i<clen; i++){
-	    card = this.raw.cardstr.slice(i*80, (i+1)*80);
-	    pars = JS9.cardpars(card);
-	    if ( pars !== undefined ) {
-		this.raw.header[pars[0]] = pars[1];
-	    }
-	}
     } else {
 	// simplest FITS header imaginable
 	this.raw.header = {};
@@ -1274,6 +1241,7 @@ JS9.Image.prototype.mkRawDataFromHDU = function(obj, file){
 	this.raw.header.NAXIS2 = this.raw.height;
 	this.raw.header.BITPIX = this.raw.bitpix;
     }
+    this.raw.card = hdu.card;
     // min and max data values
     if( hdu.dmin && hdu.dmax ){
 	this.raw.dmin = hdu.dmin;
@@ -1289,38 +1257,40 @@ JS9.Image.prototype.mkRawDataFromHDU = function(obj, file){
 	}
     }
     // image or table
-    if( hdu.imtab ){
-	this.imtab = hdu.imtab;
-    } else {
-	this.imtab = hdu.table ? "table" : "image";
-    }
+    this.imtab = hdu.table ? "table" : "image";
     // object name
     this.object = this.raw.header.OBJECT;
     // set or reset binning properties
-    if( (this.imtab === "table") && hdu.table ){
+    if( this.imtab === "table" ){
 	this.binning.bin = Number(hdu.table.bin) || 1;
     } else {
 	this.binning.bin = 1;
     }
-    // init WCS, if possible
-    this.wcs = JS9.initwcs(JS9.raw2FITS(this.raw));
-    if( this.wcs > 0 ){
-	// set the wcs system
-	this.setWCSSys(this.params.wcssys);
-	// this is also the default
-	this.params.wcssys0 = this.params.wcssys.trim();
-	// set the wcs units
-	this.setWCSUnits(this.params.wcsunits);
-    } 
-    // init the logical coordinate system, if possible
+    // init internal wcs, if possible
+    if( JS9.initwcs ){
+	try{ 
+	    s = JS9.raw2FITS(this.raw);
+	    this.wcs = JS9.initwcs(s);
+	    if( this.wcs > 0 ){
+		// set the wcs system
+		this.setWCSSys(this.params.wcssys);
+		// this is also the default
+		this.params.wcssys0 = this.params.wcssys.trim();
+		// set the wcs units
+		this.setWCSUnits(this.params.wcsunits);
+	    }
+	}
+	catch(e){ JS9.log("could not init wcs", e); }
+    } else {
+	this.wcs = 0;
+    }
+    // try to init the logical coordinate system
     this.initLCS(this.raw.header);
     // set initial scaling values if not done already
-    if( isNaN(this.params.scalemin) || 
-	(this.params.scaleclipping === "dataminmax") ){
+    if( isNaN(this.params.scalemin) || (this.params.scaleclipping === "dataminmax") ){
 	this.params.scalemin = this.raw.dmin;
     }
-    if( isNaN(this.params.scalemax) || 
-	(this.params.scaleclipping === "dataminmax") ){
+    if( isNaN(this.params.scalemax) || (this.params.scaleclipping === "dataminmax") ){
 	this.params.scalemax = this.raw.dmax;
     }
     // allow chaining 
@@ -1805,21 +1775,13 @@ JS9.Image.prototype.displayImage = function(imode){
 };
 
 // refresh data for an existing image
-// input obj is a fits object, array, typed array, etc.
+// input obj is a fitsy object, array, typed array, etc.
 JS9.Image.prototype.refreshImage = function(obj, func){
-    var key, oxcen, oycen, ozoom, dobin;
-    // save section in case it gets reset
-    oxcen = this.primary.sect.xcen;
-    oycen = this.primary.sect.ycen;
-    ozoom = this.primary.sect.zoom;
-    // save old binning
+    var key, dobin;
     this.binning.obin = this.binning.bin;
-    // generate new data
     this.mkRawDataFromHDU(obj);
     dobin = (this.binning.obin !== this.binning.bin);
-    // restore section
-    this.mkSection(oxcen, oycen, ozoom);
-    // display new image data with old section
+    this.mkSection();
     this.displayImage("colors");
     // update shape layers if we changed the binning params
     if( dobin ){
@@ -1872,9 +1834,9 @@ JS9.Image.prototype.getZoom = function(){
     return this.primary.sect.zoom;
 };
 
-// return zoom from zoom string
-JS9.Image.prototype.parseZoom = function(zval){
-    var ozoom, nzoom;
+// set zoom of primary image
+JS9.Image.prototype.setZoom = function(zval){
+    var ozoom, nzoom, key;
     // get old zoom
     ozoom = this.primary.sect.zoom;
     // determine new zoom
@@ -1912,16 +1874,6 @@ JS9.Image.prototype.parseZoom = function(zval){
     default:
 	return;
     } 
-    return nzoom;
-};
-
-// set zoom of primary image
-JS9.Image.prototype.setZoom = function(zval){
-    var nzoom, key;
-    nzoom = this.parseZoom(zval);
-    if( !nzoom ){
-	return;
-    }
     // remake section
     this.mkSection(nzoom);
     // redisplay the image
@@ -2174,6 +2126,22 @@ JS9.Image.prototype.notifyHelper = function(){
 		t = r[2];
 		if( t !== "?" ){
 		    im.fitsExt = t.match(/\[.*\]/);
+		}
+	    }
+	    if( r[3] === "wcs" ){
+		that.helperCoords = "wcs";
+		that.params.wcssys0 = r[4];
+		if( !that.params.wcssys ){
+		    // set the wcs system
+		    that.setWCSSys(that.params.wcssys);
+		    // set the wcs units
+		    that.setWCSUnits(that.params.wcsunits);
+		}
+	    } else if( r[3] === "pix" ){
+		that.helperCoords = "pix";
+		that.params.wcssys0 = that.params.lcs;
+		if( that.params.wcssys !== "image" ){
+		    that.params.wcssys = that.params.wcssys0;
 		}
 	    }
 	    // first time through, query the helper for info
@@ -2855,28 +2823,25 @@ JS9.Image.prototype.setScale = function(s0, s1, s2){
 
 // the zsale calculation
 JS9.Image.prototype.zscale = function(setvals){
-    var s, rawdata, buf, vals;
+    var s, rawdata, size, ptr, heapptr, vals;
     // sanity check
     if( !JS9.zscale || !this.raw || !this.raw.data ){
 	return this;
     }
     rawdata = this.raw.data;
-    // allocate space for the image in the emscripten heap
-    try{ buf = Module._malloc(rawdata.length * rawdata.BYTES_PER_ELEMENT); }
+    size = rawdata.length * rawdata.BYTES_PER_ELEMENT;
+    try{ ptr = Module._malloc(size); }
     catch(e){ JS9.error("image too large for zscale"); }
-    // copy the raw image data to the heap
-    Module.HEAPU8.set(new Uint8Array(rawdata.buffer), buf);
-    // call the zscale routine
-    s = JS9.zscale(buf,
+    heapptr= new Uint8Array(Module.HEAPU8.buffer, ptr, size);
+    heapptr.set(new Uint8Array(rawdata.buffer));
+    s = JS9.zscale(heapptr.byteOffset,
 		   this.raw.width, 
 		   this.raw.height,
 		   this.raw.bitpix,
 		   this.params.zscalecontrast,
 		   this.params.zscalesamples,
 		   this.params.zscaleline);
-    // free empscripten heap space
-    Module._free(buf);
-    // clean up return values
+    Module._free(heapptr.byteOffset);
     vals = s.trim().split(" ");
     // save z1 and z2
     this.params.z1 = parseFloat(vals[0]);
@@ -2994,20 +2959,13 @@ JS9.Display = function(el){
     }
     // save id
     this.id = this.divjq.attr("id");
-    // add class
-    this.divjq.addClass("JS9");
     // set width and height on div
-    this.width = this.divjq.attr("data-width");
-    if( !this.width  ){
-	this.width  = JS9.WIDTH;
-    }
-    this.divjq.css("width", this.width);
+    this.divjq
+	.addClass("JS9")
+	.css("width", JS9.WIDTH)
+	.css("height", JS9.HEIGHT);
+    // convenience variables
     this.width = parseInt(this.divjq.css("width"), 10);
-    this.height = this.divjq.attr("data-height");
-    if( !this.height ){
-	this.height = JS9.HEIGHT;
-    }
-    this.divjq.css("height", this.height);
     this.height = parseInt(this.divjq.css("height"), 10);
     // create DOM canvas element
     this.canvas = document.createElement("canvas");
@@ -3015,8 +2973,8 @@ JS9.Display = function(el){
     this.canvasjq = $(this.canvas)
 	.addClass("JS9Image")
 	.css("z-index", JS9.ZINDEX)
-	.attr("width", this.width)
-	.attr("height", this.height);
+	.attr("width", JS9.WIDTH)
+	.attr("height", JS9.HEIGHT);
     // add container to the high-level div
     this.displayConjq = $("<div>")
 	.addClass("JS9Container")
@@ -3062,20 +3020,27 @@ JS9.Display = function(el){
 		  function(evt){return JS9.keyPressCB(evt);});
     this.divjq.on("keydown", this, 
 		  function(evt){return JS9.keyDownCB(evt);});
-    // set up drag and drop, if available
-    this.divjq.on("dragenter", this, function(evt){
-	return JS9.dragenter(this.id, evt.originalEvent);
-    });
-    this.divjq.on("dragover", this, function(evt){
-	return JS9.dragover(this.id, evt.originalEvent);
-    });
-    this.divjq.on("dragexit", this, function(evt){
-	return JS9.dragexit(this.id, evt.originalEvent);
-    });
-    this.divjq.on("drop", this, function(evt){
-	return JS9.dragdrop(this.id, evt.originalEvent, JS9.NewFITSImage);
-    });
-    this.divjq.append('<div style="visibility:hidden; position:relative; top:-50;left:-50"> <input type="file" id="openLocalFile-' + this.id + '" multiple="true" onchange="javascript:for(var i=0; i<this.files.length; i++){JS9.Load(this.files[i], {display:\''+ this.id +'\'}); }"> </div>');
+    // fitsy drag and drop, if available
+    if( window.hasOwnProperty("Fitsy") ){
+	this.divjq.on("dragenter", this, function(evt){
+	    return Fitsy.dragenter(this.id, evt.originalEvent);
+	});
+	this.divjq.on("dragover", this, function(evt){
+	    return Fitsy.dragover(this.id, evt.originalEvent);
+	});
+	this.divjq.on("dragexit", this, function(evt){
+	    return Fitsy.dragexit(this.id, evt.originalEvent);
+	});
+	this.divjq.on("drop", this, function(evt){
+	    return Fitsy.dragdrop(this.id, evt.originalEvent);
+	});
+	Fitsy.options = Fitsy.options || {};
+	Fitsy.options.error = JS9.error;
+	Fitsy.options.waiting = JS9.waiting;
+    }
+    if( window.hasOwnProperty("Fitsy") ){
+	this.divjq.append('<div style="visibility:hidden; position:relative; top:-50;left:-50"> <input type="file" id="openLocalFile-' + this.id + '" multiple="true" onchange="javascript:for(var i=0; i<this.files.length; i++){JS9.Load(this.files[i], {display:\''+ this.id +'\'}); }"> </div>');
+    }
     // add to list of displays
     JS9.displays.push(this);
     // debugging
@@ -3131,7 +3096,7 @@ JS9.Display.prototype.displayPlugin = function(plugin){
 	    }
 	    // window not created: create and show it
 	    // create the window
-	    w = plugin.opts.winDims[0] || JS9.WIDTH;
+	    w = plugin.opts.winDims[0]  || JS9.WIDTH;
 	    h = plugin.opts.winDims[1] || JS9.HEIGHT;
 	    if( plugin.opts.winResize ){
 		r = "1";
@@ -3272,19 +3237,17 @@ JS9.Console = function(width, height){
     // light wins: size is set by containing window
     // for others, we need to set the size
     if( this.winType !== "light" ){
-	// set width and height on div
-	this.width = this.divjq.attr("data-width");
-	if( !this.width  ){
-	    this.width  = width || JS9.CONWIDTH;
-	}
-	this.divjq.css("width", this.width);
+	// set height and width
 	this.width = parseInt(this.divjq.css("width"), 10);
-	this.height = this.divjq.attr("data-height");
+	if( !this.width  ){
+	    this.width  = width  || JS9.CONWIDTH;
+	    this.divjq.css("width", this.width);
+	}
+	this.height = parseInt(this.divjq.css("height"), 10);
 	if( !this.height ){
 	    this.height = height || JS9.CONHEIGHT;
+	    this.divjq.css("height", this.height);
 	}
-	this.divjq.css("height", this.height);
-	this.height = parseInt(this.divjq.css("height"), 10);
 	this.consoleConjq
 	    .css("width", this.width)
 	    .css("height", this.height);
@@ -3440,19 +3403,16 @@ JS9.Info.opts = {
 };
 
 JS9.Info.init = function(width, height){
-    // set width and height on div
-    this.width = this.divjq.attr("data-width");
+    this.width = parseInt(this.divjq.css("width"), 10);
     if( !this.width  ){
 	this.width  = width || JS9.INFOWIDTH;
+	this.divjq.css("width", this.width);
     }
-    this.divjq.css("width", this.width);
-    this.width = parseInt(this.divjq.css("width"), 10);
-    this.height = this.divjq.attr("data-height");
+    this.height = parseInt(this.divjq.css("height"), 10);
     if( !this.height ){
 	this.height = height || JS9.INFOHEIGHT;
+	this.divjq.css("height", this.height);
     }
-    this.divjq.css("height", this.height);
-    this.height = parseInt(this.divjq.css("height"), 10);
     // add container to the high-level div
     this.infoConjq = $("<div>")
 	.addClass("JS9Container")
@@ -3599,23 +3559,12 @@ JS9.Info.clearMain = function(im){
 // ---------------------------------------------------------------------
 // JS9 menubar to manage menubar and its menus
 // ---------------------------------------------------------------------
-JS9.Menubar = function(width, height){
+JS9.Menubar = function(width){
     var ii, ss, tt;
     var menubarHTML;
     var that = this;
-    // set width and height on div
-    this.width = this.divjq.attr("data-width");
-    if( !this.width  ){
-	this.width = width || JS9.MENUWIDTH;
-    }
-    this.divjq.css("width", this.width);
-    this.width = parseInt(this.divjq.css("width"), 10);
-    this.height = this.divjq.attr("data-height");
-    if( !this.height  ){
-	this.height = height || JS9.MENUHEIGHT;
-    }
-    this.divjq.css("height", this.height);
-    this.height = parseInt(this.divjq.css("height"), 10);
+    // set size
+    this.divjq.css("width", width || JS9.MENUWIDTH);
     // init menubarHTML, if necessary
     if( JS9.menubarHTML === "" ){
 	JS9.menubarHTML = "<span id='JS9Menus_@@ID@@' class='ui-widget-header ui-corner-all'>";
@@ -3642,8 +3591,8 @@ JS9.Menubar = function(width, height){
     // add container to the high-level div
     this.menuConjq = $("<div>")
 	.addClass("JS9MenubarContainer")
-	.attr("width", this.width)
-	.attr("height", this.height)
+	.attr("width", JS9.MENUWIDTH)
+	.attr("height", JS9.MENUHEIGHT)
 	.html(menubarHTML)
 	.appendTo(this.divjq);
     $(function(){
@@ -3714,6 +3663,7 @@ JS9.Menubar = function(width, height){
 			var j, s;
 			var udisp = val;
 			var uim = udisp.image;
+			opt.lastmenukey = key;
 			switch(key){
 			case "close":
 			    if( uim ){
@@ -3831,6 +3781,7 @@ JS9.Menubar = function(width, height){
 			var jj, ucat, umode, uplugin;
 			var udisp = val;
 			var uim = udisp.image;
+			opt.lastmenukey = key;
 			switch(key){
 			case "valpos":
 			    if( uim ){
@@ -3915,8 +3866,6 @@ JS9.Menubar = function(width, height){
 			}
 			break;
 		    }
-		    // key was pressed
-		    e.data.edited = true;
 		};
 		var items = {};
 		items.zoomtitle = {name: "Zoom Factors:", disabled: true};
@@ -3958,6 +3907,7 @@ JS9.Menubar = function(width, height){
 		    getDisplays().forEach(function(val, idx, array){
 			var udisp = val;
 			var uim = udisp.image;
+			opt.lastmenukey = key;
 			if( uim ){
 			    switch(key){
 			    case "zoomIn":
@@ -4002,12 +3952,13 @@ JS9.Menubar = function(width, height){
 			    var udisp = that.display;
 			    var uim = udisp.image;
 			    if( uim ){
-				// if a key was pressed, do the edit
-				if( opt.edited ){
-				    delete opt.edited;
-				    obj = $.contextMenu.getInputValues(opt);
-				    editZoom(uim, obj);
+				// if a menu option was selected, we're done
+				if( opt.lastmenukey ){
+				    delete opt.lastmenukey;
+				    return;
 				}
+				obj = $.contextMenu.getInputValues(opt);
+				editZoom(uim, obj);
 			    }
 			}
 		    },
@@ -4050,8 +4001,6 @@ JS9.Menubar = function(width, height){
 			editScale(vim, obj);
 			break;
 		    }
-		    // key was pressed
-		    e.data.edited = true;
 		};
 		items.scaletitle = {name: "Scaling Algorithms:", 
 				    disabled: true};
@@ -4066,26 +4015,27 @@ JS9.Menubar = function(width, height){
 		items["sep" + n++] = "------";
 		items.scalemin = {
 		    events: {keyup: keyScale},
-		    name: "low limit for clipping:",
+		    name: "low value for clipping:", 
 		    type: "text"
 		};
 		items.scalemax = {
 		    events: {keyup: keyScale},
-		    name: "high limit for clipping:",
+		    name: "high value for clipping:", 
 		    type: "text"
 		};
 		items["sep" + n++] = "------";
 		items.dminmax = {
-		    name: "set limits to data min/max"
+		    name: "set values to data min/max"
 		};
 		items.zscale = {
-		    name: "set limits to zscale z1/z2"
+		    name: "set values to zscale z1/z2"
 		};
 		return {
                     callback: function(key, opt){
 		    getDisplays().forEach(function(val, idx, array){
 			var udisp = val;
 			var uim = udisp.image;
+			opt.lastmenukey = key;
 			if( uim ){
 			    switch(key){
 			    case "dminmax":
@@ -4134,12 +4084,13 @@ JS9.Menubar = function(width, height){
 			    var udisp = that.display;
 			    var uim = udisp.image;
 			    if( uim ){
-				// if a key was pressed, do the edit
-				if( opt.edited ){
-				    delete opt.edited;
-				    obj = $.contextMenu.getInputValues(opt);
-				    editScale(uim, obj);
+				// if a menu option was selected, we're done
+				if( opt.lastmenukey ){
+				    delete opt.lastmenukey;
+				    return;
 				}
+				obj = $.contextMenu.getInputValues(opt);
+				editScale(uim, obj);
 			    }
 			}
 		    },
@@ -4182,8 +4133,6 @@ JS9.Menubar = function(width, height){
 			editColor(vim, obj);
 			break;
 		    }
-		    // key was pressed
-		    e.data.edited = true;
 		};
 		items.cmaptitle = {name: "Colormaps:", disabled: true};
 		for(i=0; i<JS9.colormaps.length; i++){
@@ -4222,6 +4171,7 @@ JS9.Menubar = function(width, height){
 		    getDisplays().forEach(function(val, idx, array){
 			var udisp = val;
 			var uim = udisp.image;
+			opt.lastmenukey = key;
 			if( uim ){
 			    uim.setColormap(key);
 			}
@@ -4245,12 +4195,13 @@ JS9.Menubar = function(width, height){
 			    var udisp = that.display;
 			    var uim = udisp.image;
 			    if( uim ){
-				// if a key was pressed, do the edit
-				if( opt.edited ){
-				    delete opt.edited;
-				    obj = $.contextMenu.getInputValues(opt);
-				    editColor(uim, obj);
+				// if a menu option was selected, we're done
+				if( opt.lastmenukey ){
+				    delete opt.lastmenukey;
+				    return;
 				}
+				obj = $.contextMenu.getInputValues(opt);
+				editColor(uim, obj);
 			    }
 			}
 		    },
@@ -4297,6 +4248,7 @@ JS9.Menubar = function(width, height){
 		    getDisplays().forEach(function(val, idx, array){
 			var udisp = val;
 			var uim = udisp.image;
+			opt.lastmenukey = key;
 			if( uim ){
 			    switch(key){
 			    case "deleteRegions":
@@ -4363,6 +4315,7 @@ JS9.Menubar = function(width, height){
 			var rexp = new RegExp(key);
 			var udisp = val;
 			var uim = udisp.image;
+			opt.lastmenukey = key;
 			if( uim ){
 			    if( JS9.wcssyss.join("@").search(rexp) >=0 ){
 				uim.setWCSSys(key);
@@ -4476,6 +4429,7 @@ JS9.Menubar = function(width, height){
 			var a, did, jj, tplugin;
 			var udisp = val;
 			var uim = udisp.image;
+			opt.lastmenukey = key;
 			// first look for a plugin -- no image rquired
 			for(jj=0; jj<JS9.plugins.length; jj++){
 			    tplugin = JS9.plugins[jj];
@@ -4562,7 +4516,7 @@ JS9.Menubar = function(width, height){
 		    callback: function(key, opt){
 			switch(key){
 			case "about":
-			    alert(sprintf("JS9: image display right in your browser\nversion: %s\nprincipals: Eric Mandel (lead), Alexey Vikhlinin (science,management)\ncontact: saord@cfa.harvard.edu\n%s", JS9.VERSION, JS9.COPYRIGHT));
+			    alert(sprintf("JS9: image display right in your browser\nversion: %s\nprincipals: Eric Mandel (lead), John Roll (fits,plugins), Alexey Vikhlinin (science,management)\ncontact: saord@cfa.harvard.edu\n%s", JS9.VERSION, JS9.COPYRIGHT));
 			    break;
 			default:
 			    JS9.DisplayHelp(key);
@@ -6282,7 +6236,7 @@ JS9.Fabric.changeShapes = function(layerName, shape, opts){
 		    canvas.setActiveObject(obj);
 		}
 	    }
-	    break;
+ 	    break;
 	case "box":
 	    if( opts.width ){
 		obj.scaleX = zoom / bin;
@@ -6807,8 +6761,8 @@ JS9.Regions.opts = {
     ptshape: "box",
     ptsize: 2,
     // polygon in display coords
-    // points: [{x: -30, y: 30}, {x:30, y:30}, {x:30, y:-30}, {x:-30, y: -30}],
-    points: [{x: -30, y: 30}, {x:30, y:30}, {x:0, y:-30}],
+    points: [{x: -30, y: 30}, {x:30, y:30}, {x:30, y:-30}, {x:-30, y: -30}],
+    //points: [{x: -30, y: 30}, {x:30, y:30}, {x:0, y:-30}],
     // text
     // fontFamily: "Helvetica, sans-serif",
     fontFamily: "Helvetica",
@@ -7203,19 +7157,17 @@ JS9.Magnifier.HTML =
 
 // JS9 Magnifier constructor
 JS9.Magnifier.init = function(width, height){
-    // set width and height on div
-    this.width = this.divjq.attr("data-width");
-    if( !this.width  ){
-	this.width = width || JS9.MAGWIDTH;
-    }
-    this.divjq.css("width", this.width);
+    // set height and width
     this.width = parseInt(this.divjq.css("width"), 10);
-    this.height = this.divjq.attr("data-height");
+    if( !this.width  ){
+	this.width  = width  || JS9.MAGWIDTH;
+	this.divjq.css("width", this.width);
+    }
+    this.height = parseInt(this.divjq.css("height"), 10);
     if( !this.height ){
 	this.height = height || JS9.MAGHEIGHT;
+	this.divjq.css("height", this.height);
     }
-    this.divjq.css("height", this.height);
-    this.height = parseInt(this.divjq.css("height"), 10);
     // create DOM canvas element
     this.canvas = document.createElement("canvas");
     // jquery version for event handling and DOM manipulation
@@ -7306,12 +7258,9 @@ JS9.Magnifier.display = function(im, ipos){
     // display magnifier image
     magDisp.context.clear();
     magDisp.context.drawImage(canvas, sx, sy, sw, sh, dx, dy, dw, dh);
-    // stuff we only do once
+    // add the center point to the magnifier, if necessary
     if( !im.magnifier.boxid ){
-	// add the center point to the magnifier, if necessary
 	im.magnifier.boxid = im.addShapes("magnifier", "box");
-	// make background black, which looks better at the edge
-	$(magDisp.canvas).css("background-color", "black");
     }
     // set size and position based on zoom
     nx = magDisp.width/2;
@@ -7402,19 +7351,17 @@ JS9.Panner.HTML =
 JS9.Panner.init = function(width, height){
     var dlayer;
     var that = this;
-    // set width and height on div
-    this.width = this.divjq.attr("data-width");
+    // set height and width
+    this.width = parseInt(this.divjq.css("width"), 10);
     if( !this.width  ){
 	this.width  = width  || JS9.PANWIDTH;
+	this.divjq.css("width", this.width);
     }
-    this.divjq.css("width", this.width);
-    this.width = parseInt(this.divjq.css("width"), 10);
-    this.height = this.divjq.attr("data-height");
+    this.height = parseInt(this.divjq.css("height"), 10);
     if( !this.height ){
 	this.height = height || JS9.PANHEIGHT;
+	this.divjq.css("height", this.height);
     }
-    this.divjq.css("height", this.height);
-    this.height = parseInt(this.divjq.css("height"), 10);
     // create DOM canvas element
     this.canvas = document.createElement("canvas");
     // jquery version for event handling and DOM manipulation
@@ -7708,6 +7655,7 @@ JS9.Catalogs.opts = {
 // Misc. Utilities
 // ---------------------------------------------------------------------
 
+
 // http://stackoverflow.com/questions/1606797/use-of-apply-with-new-operator-is-this-possible/#1608546
 // Invoke new operator with arbitrary arguments
 // Holy Grail pattern
@@ -7977,167 +7925,6 @@ JS9.getImage = function(id){
     return im;
 };
 
-// process a list of file objects or blobs
-JS9.onFileList = function(files, options, handler){
-    var i;
-    var dofits = function(file, options, handler){
-	if( JS9.fits.handleFITSFile ){
-	    if( file.name ){
-		options.filename = file.name;
-	    }
-	    JS9.fits.handleFITSFile(file, options, handler);
-	} else {
-	    JS9.error("no FITS module available to load FITS file");
-	}
-    };
-    for(i=0; i<files.length; i++){
-	if( files[i].type.indexOf("image/") !== -1 ){
-	    switch(files[i].type){
-	    case "image/fits":
-		dofits(files[i], options, handler);
-		break;
-	    default:
-		JS9.handleImageFile(files[i], options, handler);
-		break;
-	    }
-	} else {
-	    dofits(files[i], options, handler);
-	}
-    }
-
-};
-
-// fetch a file URL (as a blob) and process it
-// (as of 2/2015: can't use $.ajax to retrieve a blob, so use low-level xhr)
-JS9.fetchURL = function(name, url, options, handler) {
-    var xhr = new XMLHttpRequest();
-    var toptions;
-    if( !url ){
-	url = name;
-	name = /([^\\\/]+)$/.exec(url)[1];
-    }
-    toptions = $.extend(true, {}, options, JS9.fits.options);
-    xhr.open('GET', url, true);
-    xhr.responseType = 'blob';
-    xhr.onload = function(e) {
-	var blob;
-        if( this.readyState === 4 ){
-	    if( this.status === 200 || this.status === 0 ){
-	        blob = new Blob([this.response]);
-		blob.name = name;
-		JS9.onFileList([blob], toptions, handler);
-	    } else if( this.status === 404 ) {
-		JS9.error("could not find " + url);
-	    } else {
-		JS9.error("can't load: " + url + " (" + this.status + ")");
-	    }
-	}
-    };
-    xhr.onerror = function(e) {
-	JS9.error("can't load: " + url);
-    };
-    xhr.onreadystatechange=function() {
-        // any response from the server will do
-	if( xhr.xtimeout ){
-	    clearTimeout(xhr.xtimeout);
-	    delete xhr.xtimeout;
-	}
-    };
-    try{ xhr.send(); }
-    catch(e){ JS9.error("request to load " + url + " failed", e); }
-    // set a timeout to catch when Mac ignores the connect request entirely
-    xhr.xtimeout=setTimeout(function(){
-	JS9.error("timeout while waiting for response from server; " + 
-		  url + " might not exist");
-    }, JS9.globalOpts.xtimeout);
-};
-
-// configure or return the fits library
-JS9.fitsLibrary = function(s){
-    var t;
-    if( !s ){
-	return JS9.fits.name;
-    }
-    t = s.toLowerCase();
-    switch(t){
-    case "fitsy":
-	JS9.fits = Fitsy;
-	JS9.fits.datahandler(JS9.NewFitsImage);
-	JS9.fits.options = JS9.fits.options || {};
-	break;
-    case "astroem":
-    case "cfitsio":
-	JS9.fits = Astroem;
-	// set up default options
-	JS9.fits.options = JS9.fits.options || {};
-	JS9.fits.options.handler = JS9.NewFitsImage;
-	JS9.fits.options.extlist = JS9.globalOpts.extlist;
-	JS9.fits.options.table = {
-	    // size of extracted image
-	    nx: JS9.globalOpts.dims[0],
-	    ny: JS9.globalOpts.dims[1]
-	};
-	if( JS9.fits.maxFITSMemory && JS9.globalOpts.maxMemory ){
-	    JS9.fits.maxFITSMemory(JS9.globalOpts.maxMemory);
-	}
-	break;
-    default:
-	JS9.error("unknown fits library: " + s);
-	break;
-    }
-    // common code
-    JS9.fits.name = t;
-    JS9.fits.options.error = JS9.error;
-    JS9.fits.options.waiting = JS9.waiting;
-    return t;
-};
-
-// load an image (jpeg, png, etc)
-// taken from fitsy.js
-JS9.handleImageFile = function(file, options, handler){
-    options = $.extend(true, {}, options, JS9.fits.options);
-    if ( handler === undefined ) { handler = JS9.Load; }
-    var reader = new FileReader();
-    reader.onload = function(ev){
-	var img = new Image();
-	img.src = ev.target.result;
-	img.onload = function(){
-	    var x, y, brightness;
-	    var i = 0;
-	    var canvas = document.createElement('canvas');
-	    var ctx    = canvas.getContext('2d');
-	    var h      = img.height;
-	    var w      = img.width;
-	    canvas.width  = w;
-	    canvas.height = h;
-	    ctx.drawImage(img, 0, 0);
-	    var data   = ctx.getImageData(0, 0, w, h).data;
-	    var gray   = new Float32Array(h*w);
-	    for ( y = 0; y < h; y++ ) {
-		for ( x = 0; x < w; x++ ) {
-		    // NTSC
-		    brightness = 0.299 * data[i] +
-			         0.587 * data[i + 1] +
-			         0.114 * data[i + 2];
-		    gray[(h - y) * w + x] = brightness;
-		    i += 4;
-		}
-	    }
-	    var hdu = {head: {}, name: file.name, filedata: gray,
-		       naxis: 2, axis: [0, w, h], bitpix: -32,
-		       data: gray};
-	    hdu.dmin = Number.MAX_VALUE;
-	    hdu.dmax = Number.MIN_VALUE;
-	    for(i=0; i< h*w; i++){
-		hdu.dmin = Math.min(hdu.dmin, hdu.data[i]);
-		hdu.dmax = Math.max(hdu.dmax, hdu.data[i]);
-	    }
-	    handler(hdu, options);
-	};
-    };
-    reader.readAsDataURL(file);
-};
-
 // return the specified colormap object (or default)
 JS9.lookupColormap = function(name){
     var i;
@@ -8176,8 +7963,6 @@ JS9.error = function(emsg, epattern, dothrow){
     var stack = "";
     var doerr = true;
 
-    // reset wait cursor
-    JS9.waiting(false);
     // second args can be error pattern to look for, or else an error object
     if( typeof epattern === "string" ){
 	earr = emsg.match(epattern);
@@ -8296,42 +8081,15 @@ JS9.log = function(){
     }
 };
 
-JS9.isNumber = function(s) {
-    return !isNaN(parseFloat(s)) && isFinite(s);
-};
-
-JS9.cardpars = function(card){
-    var name, value;
-    if ( card[8] !== "=" ){ return undefined; }
-    name = card.slice(0, 8).trim();
-    value = card.slice(10).replace(/\'/g, " ").replace(/\/.*/, "").trim();
-    if( value === "T" ){
-	value = true;
-    } else if( value === "F" ){
-	value = false;
-    } else if( JS9.isNumber(value) ){
-	value = parseFloat(value);
-    }
-    return [name, value];
-};
-
 // convert obj to FITS-style string
 JS9.raw2FITS = function(raw, forDisplay){
     var i, obj, key, val;
     var hasend=false;
     var t="";
+    // raw.card has comments, so use this if we are displaying header
     if( raw.card ){
-	// raw.card has comments, so use this if we are displaying header
 	for(i=0; i<raw.card.length; i++){
 	    t += raw.card[i];
-	    if( forDisplay ){
-		t += "\n";
-	    }
-	}
-    } else if( raw.cardstr ){
-	// raw.cardstr has comments, so use this if we are displaying header
-	for(i=0; i<raw.ncard; i++){
-	    t += raw.cardstr.slice(i*80, (i+1)*80);
 	    if( forDisplay ){
 		t += "\n";
 	    }
@@ -8827,31 +8585,6 @@ JS9.keyDownCB = function(evt){
     }
 };
 
-JS9.dragenter = function(id, e){
-    e.stopPropagation();
-    e.preventDefault();
-};
-
-JS9.dragover = function(id, e){
-    e.stopPropagation();
-    e.preventDefault();
-};
-
-JS9.dragexit = function(id, e){
-    e.stopPropagation();
-    e.preventDefault();
-};
-
-JS9.dragdrop = function(id, e, handler){
-    var files = e.target.files || e.dataTransfer.files;
-    var opts = $.extend(true, {}, JS9.fits.options);
-    e.stopPropagation();
-    e.preventDefault();
-    if( opts.display === undefined ){ opts.display = id; }
-    if( opts.extlist === undefined ){ opts.extlist = JS9.globalOpts.extlist; }
-    JS9.onFileList(files, opts, handler);
-};
-
 // ---------------------------------------------------------------------
 // special event handlers
 // ---------------------------------------------------------------------
@@ -9197,21 +8930,6 @@ JS9.init = function(){
     if( window.hasOwnProperty("Kinetic") && !window.hasOwnProperty("fabric") ){
 	JS9.error("please load fabric.js instead of Kinetic.js");
     }
-    // set up sizes, if not already done (i.e. in Web page or prefs file)
-    JS9.WIDTH = JS9.WIDTH || 512;	        // width of js9 canvas
-    JS9.HEIGHT = JS9.HEIGHT || 512;		// height of js9 canvas
-    JS9.INFOWIDTH = JS9.INFOWIDTH || 345;	// width of js9Info box
-    JS9.INFOHEIGHT = JS9.INFOHEIGHT || 265;	// height of js9Info box
-    JS9.MENUWIDTH = JS9.MENUWIDTH || JS9.WIDTH;	// width of js9Menubar
-    JS9.MENUHEIGHT = JS9.MENUHEIGHT || "auto";	// height of js9Menubar
-    JS9.CONWIDTH = JS9.CONWIDTH || JS9.WIDTH;	// width of js9Console
-    JS9.CONHEIGHT = JS9.CONHEIGHT || 180;	// height of js9Console
-    JS9.MAGWIDTH = JS9.MAGWIDTH || JS9.WIDTH/2;	// width of js9Mag canvas
-    JS9.MAGHEIGHT = JS9.MAGHEIGHT || JS9.HEIGHT/2; // height of js9Mag canvas
-    JS9.PANWIDTH = JS9.PANWIDTH || 320;		// width of js9Pan canvas
-    JS9.PANHEIGHT = JS9.PANHEIGHT || 320;	// height of js9Pan canvas
-    JS9.DS9WIDTH = JS9.DS9WIDTH || 250;		// width of small js9Pan canvas
-    JS9.DS9HEIGHT = JS9.DS9HEIGHT || 250;	// height of small js9Pan canvas
     // set up the dynamic drive html window
     if( JS9.LIGHTWIN === "dhtml" ){
 	// Creation of dhtmlwindowholder was done by a document.write in 
@@ -9242,34 +8960,12 @@ JS9.init = function(){
 				JS9.InstallDir("images/restore.gif"), 
 				JS9.InstallDir("images/resize.gif")];
     }
-    // set this to false in the page to avoid loading a prefs file
-    if( JS9.PREFSFILE ){
-	// load site preferences, if possible
-	JS9.loadPrefs(JS9.InstallDir(JS9.PREFSFILE), 1);
-	// load page preferences, if possible
-	JS9.loadPrefs(JS9.PREFSFILE, 0);
-    }
+    // load site preferences, if possible
+    JS9.loadPrefs(JS9.InstallDir(JS9.PREFSFILE), 1);
+    // load page preferences, if possible
+    JS9.loadPrefs(JS9.PREFSFILE, 0);
     // set debug flag
     JS9.DEBUG = JS9.DEBUG || JS9.globalOpts.debug || 0;
-    // initialize astronomy emscripten routines (wcslib, etc), if possible
-    if( window.hasOwnProperty("Astroem") ){
-	JS9.initwcs = Astroem.initwcs;
-	JS9.wcssys = Astroem.wcssys;
-	JS9.wcsunits = Astroem.wcsunits;
-	JS9.pix2wcs = Astroem.pix2wcs;
-	JS9.wcs2pix = Astroem.wcs2pix;
-	JS9.reg2wcs = Astroem.reg2wcs;
-	JS9.saostrtod = Astroem.saostrtod;
-	JS9.zscale = Astroem.zscale;
-    }
-    // configure fits library
-    if( window.hasOwnProperty("Fitsy") ){
-	JS9.fitsLibrary("fitsy");
-	JS9.fits = Fitsy;
-    } else if( window.hasOwnProperty("Astroem") ){
-	JS9.fitsLibrary("cfitsio");
-	JS9.fits = Astroem;
-    }
     // init primary display(s)
     $("div.JS9").each(function(){
 	JS9.checkNew(new JS9.Display($(this)));
@@ -9841,6 +9537,21 @@ JS9.init = function(){
     }));
     // load external helper support
     JS9.helper = new JS9.Helper();
+    // initialize fitsy, if possible
+    if( window.hasOwnProperty("Fitsy") ){
+	Fitsy.datahandler(JS9.Load);
+    }
+    // initialize astronomy emscripten routines (wcslib, etc), if possible
+    if( window.hasOwnProperty("Astroem") ){
+	JS9.initwcs = Astroem.initwcs;
+	JS9.wcssys = Astroem.wcssys;
+	JS9.wcsunits = Astroem.wcsunits;
+	JS9.pix2wcs = Astroem.pix2wcs;
+	JS9.wcs2pix = Astroem.wcs2pix;
+	JS9.reg2wcs = Astroem.reg2wcs;
+	JS9.saostrtod = Astroem.saostrtod;
+	JS9.zscale = Astroem.zscale;
+    }
     //  for analysis forms, Enter should not Submit
     $(document).on("keyup keypress", ".js9AnalysisForm", function(e){
 	var code = e.keyCode || e.which;
@@ -9939,7 +9650,7 @@ JS9.mkPublic("RunAnalysis", "runAnalysis");
 
 // display in-page FITS images and png files
 JS9.mkPublic("Load", function(file, opts){
-    var i, im, ext, display, func, blob, bytes, topts, tfile;
+    var i, im, ext, display, func, blob, bytes;
     var obj = JS9.parsePublicArgs(arguments);
     // sanity check
     if( !file ){
@@ -9984,15 +9695,11 @@ JS9.mkPublic("Load", function(file, opts){
 	if( !opts.filename ){
 	    opts.filename = JS9.ANON;
 	}
-	if( JS9.fits.handleFITSFile ){
-	    topts = $.extend(true, {}, opts, JS9.fits.options);
-	    JS9.fits.handleFITSFile(file, topts, JS9.NewFitsImage);
-	} else {
-	    JS9.error("no FITS module available to load this FITS blob");
-	}
+	file.name = opts.filename;
+	Fitsy.handleFITSFile(file, opts, JS9.NewFitsImage);
 	return;
     }
-    // handle raw (fits) data objects
+    // handle raw (fitsy) data objects
     if( typeof file === "object" ){
 	JS9.checkNew(new JS9.Image(file, opts, func));
 	return;
@@ -10016,12 +9723,7 @@ JS9.mkPublic("Load", function(file, opts){
 	    opts.filename = JS9.ANON;
 	}
 	blob.name = opts.filename;
-	if( JS9.fits.handleFITSFile ){
-	    topts = $.extend(true, {}, opts, JS9.fits.options);
-	    JS9.fits.handleFITSFile(blob, topts, JS9.NewFitsImage);
-	} else {
-	    JS9.error("no FITS module available to process this memory FITS");
-	}
+	Fitsy.handleFITSFile(blob, opts, JS9.NewFitsImage);
 	return;
     }
     // if this file is already loaded, just redisplay
@@ -10041,7 +9743,14 @@ JS9.mkPublic("Load", function(file, opts){
 	    // png file: call the constructor and save the result
 	    JS9.checkNew(new JS9.Image(file, opts, func));
 	} else {
-	    JS9.fetchURL(null, file, opts, JS9.NewFitsImage);
+	    if( window.hasOwnProperty("Fitsy") ){
+		// change the cursor to show the waiting status
+		JS9.waiting(true);
+		// ask fitsy to load the file
+		Fitsy.fetchURL(null, file, opts, JS9.NewFitsImage);
+	    } else {
+		JS9.error("no FITS module available to load this png: " + file);
+	    }
 	}
     } else {
 	// if opts explcitly specifies fits2png or if it's set globally ...
@@ -10087,10 +9796,14 @@ JS9.mkPublic("Load", function(file, opts){
 		JS9.error("no helper available to convert this image: " + file);
 	    }
 	} else {
-	    JS9.waiting(true);
-	    // remove extension so we can find the file itself
-	    tfile = file.replace(/\[.*\]/, "");
-	    JS9.fetchURL(file, tfile, opts, JS9.NewFitsImage);
+	    if( window.hasOwnProperty("Fitsy") ){
+		// change the cursor to show the waiting status
+		JS9.waiting(true);
+		// ask fitsy to load the file
+		Fitsy.fetchURL(file, file, opts, JS9.NewFitsImage);
+	    } else {
+		JS9.error("no FITS module available to load this image: " + file);
+	    }
 	}
     }
 });
@@ -10240,7 +9953,9 @@ JS9.mkPublic("Preload", function(arg1){
 	    }
 	}
 	JS9.globalOpts.alerts = true;
-	if( emsg ){ JS9.error("could not preload image(s): " + emsg); }
+	if( emsg ){
+	    alert("could not preload image(s): " + emsg);
+	}
 	break;
     case 2:
 	// preload the image(s) now from saved arguments
@@ -10248,18 +9963,18 @@ JS9.mkPublic("Preload", function(arg1){
 	for(i=0; i<JS9.preloads.length; i++){
 	    try{ 
 		if( JS9.preloads[i][2] ){
-		    JS9.Load(JS9.preloads[i][0], JS9.preloads[i][1],
-			     JS9.preloads[i][2]); 
+		    JS9.Load(JS9.preloads[i][0], JS9.preloads[i][1], JS9.preloads[i][2]); 
 		} else {
-		    JS9.Load(JS9.preloads[i][0], JS9.preloads[i][1]);
+		    JS9.Load(JS9.preloads[i][0], JS9.preloads[i][1]); 
 		}
 	    }
 	    catch(e){ emsg = emsg + " " + JS9.preloads[i][0]; }
 	}
 	JS9.globalOpts.alerts = true;
-	if( emsg ){ JS9.error("could not preload image(s): " + emsg); }
-	// remove saved arguments so we don't reload them on reconnect
-	JS9.preloads = [];
+	if( emsg ){
+	    alert("could not preload image(s): " + emsg);
+	}
+
 	break;
     case 3:
 	// do nothing
@@ -10278,11 +9993,8 @@ JS9.mkPublic("RefreshImage", function(fits, func){
     };
     if( im ){
 	if( fits instanceof Blob ){
-	    if( JS9.fits.handleFITSFile ){
-		JS9.fits.handleFITSFile(fits, JS9.fits.options, retry);
-	    } else {
-		JS9.error("no FITS module available to refresh this image");
-	    }
+	    Fitsy.handleFITSFile(fits, Fitsy.options, retry);
+	    return;
 	}
 	JS9.Image.prototype.refreshImage.apply(im, obj.argv);
     } else if( fits instanceof Blob ){

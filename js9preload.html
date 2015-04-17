@@ -7,16 +7,17 @@
   <link type="text/css" rel="stylesheet" href="js9support.css">
   <link type="text/css" rel="stylesheet" href="js9.css">
   <script type="text/javascript" src="js9support.min.js"></script>
+  <script type="text/javascript" src="fitsy.min.js"></script>
   <script type="text/javascript" src="js9.min.js"></script>
   <script type="text/javascript" src="js9plugins.js"></script>
 </head>
 <body onload="JS9.Preload('png/casa.png', 
-		'fits/snr.fits[events][pi==pha]', {scale:'log'},
-		'png/m13.png', {scale:'linear', colormap:'sls'},
-		'fits/3c273.fits',
-		'png/3c58.png',
-		'fits/ngc1316.fits', {scale:'linear'},
-		'fits/ngkper.fits', {zoom: 'toFit', scale:'log'});">
+		          'png/snr.png', {colormap:'heat'},
+		          'fits/3c58.fits',
+		          'png/m13.png', {scale:'linear', colormap:'sls'},
+		          'fits/3c273.fits',
+		          'fits/ngc1316.fits', {scale:'linear'},
+		          'fits/ngkper.fits', {colormap:'grey'});">
     <font size="+1"><center>
     <b>JS9 Demo: preloading images into JS9</b>
     </center></font>
@@ -27,7 +28,6 @@
 JS9 Demos:
 <ul>
 <li><a href='js9basics.html'>JS9 Demo: the basics</a>
-<li><a href='js9sizes.html'>JS9 Demo: setting the size of the JS9 display</a>
 <li><a href='js9plugins.html'>JS9 Demo: adding plugins to JS9</a> 
 <li><a href='js9imexam.html'>JS9 Demo: the imexam plugin for JS9</a> 
 <li><a href='js9cat.html'>JS9 Demo: overlaying catalogs</a>

@@ -375,7 +375,7 @@ var CatalogService = require("./catalog-service");
 
 },{"./catalog-service":2,"./strtod":8}],4:[function(require,module,exports){
 /*jslint white: true, vars: true, plusplus: true, nomen: true, unparam: true */
-/*globals xhr, Blob, JS9 */
+/*globals xhr, Blob, Fitsy */
 
 "use strict";
 
@@ -404,7 +404,12 @@ function ImageService(params) {
 	    if ( params.handler === undefined ) {
 		var blob      = new Blob([xhr.response]);
 		blob.name = values.name;
-		JS9.fits.handleFITSFile(blob, { display: display });
+
+		if ( Fitsy.handleFITSFile === undefined ) {
+		    Fitsy.handleFITSFiles(undefined, [blob], { display: display });
+		} else {
+		    Fitsy.handleFITSFile(blob, { display: display });
+		}
 	    } else {
 	    	params.handler(e, xhr, params, values);
 	    }

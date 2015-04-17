@@ -506,3 +506,10 @@ body.waiting, body.waiting *
 { 
     cursor: wait !important;
 }
+#close {
+  float:right;
+  display:inline-block;
+  padding:2px 5px;
+  cursor: pointer;
+}
+
